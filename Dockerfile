@@ -22,6 +22,12 @@ RUN unzip -q /tmp/redscribe.zip -d /tmp/redscribe-src \
     && cp -a /tmp/redscribe-src/RedScribe_Studio_5.0.0_Railway_Original/. /app/ \
     && rm -rf /tmp/redscribe.zip /tmp/redscribe-src
 
+# Ponte híbrida: preserva HTML/CSS/JS original e injeta apenas o roteador de
+# processamento local ANTES do dashboard.js. Downloads, Whisper, FFmpeg, Shorts
+# e Studio passam a usar o RedScribe Local Engine no computador do usuário.
+COPY patches/local_bridge.js /app/static/local_bridge.js
+RUN python -c "from pathlib import Path; p=Path('/app/templates/dashboard.html'); s=p.read_text(encoding='utf-8'); marker='<script src=\"/static/dashboard.js?v=5.0.5\"></script>'; bridge='<script src=\"/static/local_bridge.js?v=5.1.0\"></script>'; s=s if 'local_bridge.js' in s else s.replace(marker, bridge+'\\n'+marker); p.write_text(s, encoding='utf-8')"
+
 RUN pip install --upgrade pip setuptools wheel \
     && pip install -r requirements-cloud.txt
 
