@@ -6,6 +6,7 @@ from flask import Response
 VERIFICATION_FILES = {
     "tiktokV7i98WfQ8PcGChU9hdKsWROvqzITJhdY.txt": "tiktok-developers-site-verification=V7i98WfQ8PcGChU9hdKsWROvqzITJhdY",
     "tiktokzE7WOzgbj6oap69bVbl0YtGj2Dnf0t7I.txt": "tiktok-developers-site-verification=zE7WOzgbj6oap69bVbl0YtGj2Dnf0t7I",
+    "tiktokjT54QMeEfFhqu4P8Z0ITHDO3gzkMUjxz.txt": "tiktok-developers-site-verification=jT54QMeEfFhqu4P8Z0ITHDO3gzkMUjxz",
 }
 
 
@@ -17,17 +18,37 @@ def _response(filename: str) -> Response:
 
 
 def register_tiktok_verification(app) -> None:
-    # Prefixo atual solicitado pelo TikTok Developers.
+    # Token atual. O TikTok pode pedir o mesmo arquivo em prefixos diferentes
+    # (Web, Termos e Privacidade), então servimos o arquivo exatamente em cada um.
+    current = "tiktokjT54QMeEfFhqu4P8Z0ITHDO3gzkMUjxz.txt"
+
+    @app.get("/tiktokjT54QMeEfFhqu4P8Z0ITHDO3gzkMUjxz.txt")
+    def tiktok_verify_root_latest():
+        return _response(current)
+
+    @app.get("/terms/tiktokjT54QMeEfFhqu4P8Z0ITHDO3gzkMUjxz.txt")
+    def tiktok_verify_terms_latest():
+        return _response(current)
+
+    @app.get("/privacy/tiktokjT54QMeEfFhqu4P8Z0ITHDO3gzkMUjxz.txt")
+    def tiktok_verify_privacy_latest():
+        return _response(current)
+
+    # Também deixa o token atual no prefixo do callback, caso o portal peça
+    # verificação específica da URI de redirecionamento.
+    @app.get("/api/tiktok/callback/tiktokjT54QMeEfFhqu4P8Z0ITHDO3gzkMUjxz.txt")
+    def tiktok_verify_callback_latest():
+        return _response(current)
+
+    # Mantém as verificações anteriores disponíveis por compatibilidade.
     @app.get("/api/tiktok/callback/tiktokV7i98WfQ8PcGChU9hdKsWROvqzITJhdY.txt")
     def tiktok_verify_callback_current():
         return _response("tiktokV7i98WfQ8PcGChU9hdKsWROvqzITJhdY.txt")
 
-    # Mantém o token da tentativa anterior disponível caso o portal volte a pedi-lo.
     @app.get("/api/tiktok/callback/tiktokzE7WOzgbj6oap69bVbl0YtGj2Dnf0t7I.txt")
     def tiktok_verify_callback_previous():
         return _response("tiktokzE7WOzgbj6oap69bVbl0YtGj2Dnf0t7I.txt")
 
-    # Também expõe ambos na raiz para a verificação de prefixo do domínio base.
     @app.get("/tiktokV7i98WfQ8PcGChU9hdKsWROvqzITJhdY.txt")
     def tiktok_verify_root_current():
         return _response("tiktokV7i98WfQ8PcGChU9hdKsWROvqzITJhdY.txt")
