@@ -22,11 +22,14 @@ RUN unzip -q /tmp/redscribe.zip -d /tmp/redscribe-src \
     && cp -a /tmp/redscribe-src/RedScribe_Studio_5.0.0_Railway_Original/. /app/ \
     && rm -rf /tmp/redscribe.zip /tmp/redscribe-src
 
-# Ponte híbrida: preserva HTML/CSS/JS original e injeta apenas o roteador de
-# processamento local ANTES do dashboard.js. Downloads, Whisper, FFmpeg, Shorts
-# e Studio passam a usar o RedScribe Local Engine no computador do usuário.
+# Ponte híbrida + publicação TikTok. O HTML/CSS original é preservado; apenas
+# scripts de integração são injetados.
 COPY patches/local_bridge.js /app/static/local_bridge.js
-RUN python -c "from pathlib import Path; p=Path('/app/templates/dashboard.html'); s=p.read_text(encoding='utf-8'); marker='<script src=\"/static/dashboard.js?v=5.0.5\"></script>'; bridge='<script src=\"/static/local_bridge.js?v=5.1.0\"></script>'; s=s if 'local_bridge.js' in s else s.replace(marker, bridge+'\\n'+marker); p.write_text(s, encoding='utf-8')"
+COPY patches/tiktok_publish.js /app/static/tiktok_publish.js
+COPY patches/tiktok_cloud.py /app/tiktok_cloud.py
+
+RUN python -c "from pathlib import Path; p=Path('/app/templates/dashboard.html'); s=p.read_text(encoding='utf-8'); marker='<script src=\"/static/dashboard.js?v=5.0.5\"></script>'; bridge='<script src=\"/static/local_bridge.js?v=5.1.2\"></script>'; s=s if 'local_bridge.js' in s else s.replace(marker, bridge+'\\n'+marker); p.write_text(s, encoding='utf-8')"
+RUN python -c "from pathlib import Path; p=Path('/app/templates/dashboard.html'); s=p.read_text(encoding='utf-8'); marker='<script src=\"/static/studio.js?v=4.0.0\"></script>'; tiktok='<script src=\"/static/tiktok_publish.js?v=5.1.2\"></script>'; s=s if 'tiktok_publish.js' in s else s.replace(marker, marker+'\\n'+tiktok); p.write_text(s, encoding='utf-8')"
 
 RUN pip install --upgrade pip setuptools wheel \
     && pip install -r requirements-cloud.txt
@@ -35,4 +38,4 @@ RUN mkdir -p /data/redscribe /data/cache
 
 EXPOSE 8080
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --threads 8 --timeout 3600 --graceful-timeout 120 --keep-alive 5 --access-logfile - --error-logfile - app:app"]
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --threads 8 --timeout 3600 --graceful-timeout 120 --keep-alive 5 --access-logfile - --error-logfile - tiktok_cloud:app"]
