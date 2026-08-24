@@ -26,10 +26,11 @@ RUN unzip -q /tmp/redscribe.zip -d /tmp/redscribe-src \
 # scripts de integração são injetados.
 COPY patches/local_bridge.js /app/static/local_bridge.js
 COPY patches/tiktok_publish.js /app/static/tiktok_publish.js
+COPY patches/publish_hub.js /app/static/publish_hub.js
 COPY patches/tiktok_cloud.py /app/tiktok_cloud.py
 
 RUN python -c "from pathlib import Path; p=Path('/app/templates/dashboard.html'); s=p.read_text(encoding='utf-8'); marker='<script src=\"/static/dashboard.js?v=5.0.5\"></script>'; bridge='<script src=\"/static/local_bridge.js?v=5.1.3\"></script>'; s=s if 'local_bridge.js' in s else s.replace(marker, bridge+'\\n'+marker); p.write_text(s, encoding='utf-8')"
-RUN python -c "from pathlib import Path; p=Path('/app/templates/dashboard.html'); s=p.read_text(encoding='utf-8'); marker='<script src=\"/static/studio.js?v=4.0.0\"></script>'; tiktok='<script src=\"/static/tiktok_publish.js?v=5.1.2\"></script>'; s=s if 'tiktok_publish.js' in s else s.replace(marker, marker+'\\n'+tiktok); p.write_text(s, encoding='utf-8')"
+RUN python -c "from pathlib import Path; p=Path('/app/templates/dashboard.html'); s=p.read_text(encoding='utf-8'); marker='<script src=\"/static/studio.js?v=4.0.0\"></script>'; tiktok='<script src=\"/static/tiktok_publish.js?v=5.1.2\"></script>\\n<script src=\"/static/publish_hub.js?v=5.2.3\"></script>'; s=s if 'publish_hub.js' in s else s.replace(marker, marker+'\\n'+tiktok); p.write_text(s, encoding='utf-8')"
 
 RUN pip install --upgrade pip setuptools wheel \
     && pip install -r requirements-cloud.txt
