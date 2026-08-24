@@ -2,6 +2,7 @@
   'use strict';
 
   const LOCAL_BASE = 'http://127.0.0.1:8765';
+  const REQUIRED_ENGINE_VERSION = '5.1.2-hybrid';
   const nativeFetch = window.fetch.bind(window);
 
   const LOCAL_API_PREFIXES = [
@@ -35,11 +36,12 @@
     '/api/recommendations',
     '/api/youtube/search',
     '/api/settings',
-    '/api/ai/'
+    '/api/ai/',
+    '/api/tiktok/'
   ];
 
-  // Somente as preferências de armazenamento precisam ser locais.
   function isLocalRoute(pathname) {
+    if (pathname.startsWith('/api/tiktok/local/')) return true;
     if (pathname.startsWith('/api/settings/storage')) return true;
     if (CLOUD_ONLY_PREFIXES.some(prefix => pathname.startsWith(prefix))) return false;
     return LOCAL_API_PREFIXES.some(prefix => pathname.startsWith(prefix)) ||
@@ -78,7 +80,7 @@
 
   function offlineResponse() {
     return new Response(JSON.stringify({
-      error: 'O motor local do RedScribe não está aberto. Abra o RedScribe Local Engine no computador e tente novamente.'
+      error: 'O motor local do RedScribe não está aberto ou está desatualizado. Abra o RedScribe Local Engine 5.1.2 e tente novamente.'
     }), {
       status: 503,
       headers: {'Content-Type': 'application/json; charset=utf-8'}
@@ -133,13 +135,18 @@
 
   window.RedScribeLocalBridge = {
     base: LOCAL_BASE,
+    requiredVersion: REQUIRED_ENGINE_VERSION,
     health,
     isLocalRoute
   };
 
-  // Apenas registra o estado. Não altera o visual original do aplicativo.
   health().then(info => {
-    if (info?.ok) console.info('[RedScribe] Local Engine conectado', info);
-    else console.info('[RedScribe] Local Engine ainda não está aberto');
+    if (info?.ok && info.version === REQUIRED_ENGINE_VERSION) {
+      console.info('[RedScribe] Local Engine conectado', info);
+    } else if (info?.ok) {
+      console.warn(`[RedScribe] Local Engine desatualizado: ${info.version}. Necessário: ${REQUIRED_ENGINE_VERSION}`);
+    } else {
+      console.info('[RedScribe] Local Engine ainda não está aberto');
+    }
   });
 })();
