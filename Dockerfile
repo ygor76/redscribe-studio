@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-# RedScribe Publish Hub 5.2.5 - TikTok panel fix
+# RedScribe Publish Hub 5.2.6 - TikTok site verification
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -29,6 +29,10 @@ COPY patches/local_bridge.js /app/static/local_bridge.js
 COPY patches/tiktok_publish.js /app/static/tiktok_publish.js
 COPY patches/publish_hub.js /app/static/publish_hub.js
 COPY patches/tiktok_cloud.py /app/tiktok_cloud.py
+COPY patches/tiktok_verification.py /app/tiktok_verification.py
+
+# Registra apenas as rotas públicas dos arquivos de verificação do TikTok.
+RUN printf '\nfrom tiktok_verification import register_tiktok_verification\nregister_tiktok_verification(app)\n' >> /app/tiktok_cloud.py
 
 RUN python -c "from pathlib import Path; p=Path('/app/templates/dashboard.html'); s=p.read_text(encoding='utf-8'); marker='<script src=\"/static/dashboard.js?v=5.0.5\"></script>'; bridge='<script src=\"/static/local_bridge.js?v=5.1.3\"></script>'; s=s if 'local_bridge.js' in s else s.replace(marker, bridge+'\\n'+marker); p.write_text(s, encoding='utf-8')"
 RUN python -c "from pathlib import Path; p=Path('/app/templates/dashboard.html'); s=p.read_text(encoding='utf-8'); marker='<script src=\"/static/studio.js?v=4.0.0\"></script>'; tiktok='<script src=\"/static/tiktok_publish.js?v=5.1.2\"></script>\\n<script src=\"/static/publish_hub.js?v=5.2.5\"></script>'; s=s if 'publish_hub.js' in s else s.replace(marker, marker+'\\n'+tiktok); p.write_text(s, encoding='utf-8')"
