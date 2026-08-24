@@ -170,7 +170,7 @@ def _source_info(video_size: int) -> dict[str, Any]:
         count = 1
     else:
         chunk = 10 * 1024 * 1024
-        count = max(1, size // chunk)
+        count = max(1, (size + chunk - 1) // chunk)
     return {
         "source": "FILE_UPLOAD",
         "video_size": size,
