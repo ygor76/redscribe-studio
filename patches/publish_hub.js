@@ -19,6 +19,8 @@
 
   let modalObserver = null;
   let tiktokObserver = null;
+  let modalWasOpen = false;
+  let tiktokPanelWasVisible = false;
 
   function injectStyles() {
     if ($('rsPublishHubStyles')) return;
@@ -203,18 +205,27 @@
     if (!p || p.dataset.rsWatch) return;
     p.dataset.rsWatch = '1';
     decorateTikTokPanel();
+    tiktokPanelWasVisible = !p.classList.contains('hidden');
     new MutationObserver(() => {
-      if (!$('publishModal')?.classList.contains('hidden') && !p.classList.contains('hidden')) showTikTokDetail();
+      const visible = !p.classList.contains('hidden');
+      const modalOpen = !$('publishModal')?.classList.contains('hidden');
+      if (modalOpen && visible && !tiktokPanelWasVisible) showTikTokDetail();
+      tiktokPanelWasVisible = visible;
     }).observe(p, {attributes:true, attributeFilter:['class']});
   }
 
   function watchModal() {
     const modal = $('publishModal');
     if (!modal || modalObserver) return;
+    modalWasOpen = !modal.classList.contains('hidden');
     modalObserver = new MutationObserver(() => {
-      if (!modal.classList.contains('hidden')) setTimeout(resetPicker, 0);
+      const isOpen = !modal.classList.contains('hidden');
+      // Só volta ao seletor quando o modal realmente abre. Mudanças internas de
+      // classe (ex.: entrar no TikTok) não podem resetar a integração.
+      if (isOpen && !modalWasOpen) setTimeout(resetPicker, 0);
+      modalWasOpen = isOpen;
     });
-    modalObserver.observe(modal, {attributes:true, attributeFilter:['class'], childList:true, subtree:true});
+    modalObserver.observe(modal, {attributes:true, attributeFilter:['class']});
   }
 
   function bind() {
