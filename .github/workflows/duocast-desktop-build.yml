@@ -1,0 +1,59 @@
+name: DuoCast Desktop Windows Installer
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'duocast-desktop/**'
+      - '.github/workflows/duocast-desktop-build.yml'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: duocast-desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Prepare DuoCast icon
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/icons | Out-Null
+          Invoke-WebRequest -Uri 'https://duocastapp.netlify.app/icon-512.png' -OutFile src-tauri/icons/icon-source.png
+          python -m pip install --disable-pip-version-check pillow
+          @'
+          from PIL import Image
+          from pathlib import Path
+          p=Path('src-tauri/icons/icon-source.png')
+          im=Image.open(p).convert('RGBA')
+          im.resize((32,32),Image.LANCZOS).save('src-tauri/icons/32x32.png')
+          im.resize((128,128),Image.LANCZOS).save('src-tauri/icons/128x128.png')
+          im.resize((256,256),Image.LANCZOS).save('src-tauri/icons/128x128@2x.png')
+          im.save('src-tauri/icons/icon.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])
+          '@ | Set-Content -Encoding UTF8 make_icon.py
+          python make_icon.py
+
+      - name: Install frontend tooling
+        run: npm install
+
+      - name: Build DuoCast installer
+        run: npm run build:windows
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: DuoCast-Desktop-Windows-Installer
+          path: duocast-desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,16 @@
+[package]
+name = "duocast-desktop"
+version = "1.0.0"
+description = "DuoCast Desktop"
+authors = ["DuoCast"]
+edition = "2021"
+
+[lib]
+name = "duocast_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.1", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.1", features = [] }
