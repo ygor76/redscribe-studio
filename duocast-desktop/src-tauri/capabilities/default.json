@@ -6,5 +6,12 @@
   "remote": {
     "urls": ["https://duocastapp.netlify.app/*"]
   },
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "allow-native-list-sources",
+    "allow-native-start-capture",
+    "allow-native-capture-frame",
+    "allow-native-capture-audio",
+    "allow-native-stop-capture"
+  ]
 }
