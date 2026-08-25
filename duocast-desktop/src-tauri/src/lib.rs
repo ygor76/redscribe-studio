@@ -1,6 +1,6 @@
-mod native_capture;
+mod native_capture_v2;
 
-use native_capture::{
+use native_capture_v2::{
     native_capture_audio, native_capture_frame, native_list_sources, native_start_capture,
     native_stop_capture, NativeCaptureState,
 };
