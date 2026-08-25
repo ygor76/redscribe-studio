@@ -1,10 +1,14 @@
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 
-use miniaudio::{Backend, Context as AudioContext, Device, DeviceConfig, DeviceType, Format};
 use serde::Serialize;
 use tauri::{ipc::Response, State};
+use wasapi::{
+    initialize_mta, DeviceEnumerator, Direction, SampleType, StreamMode, WaveFormat,
+};
 use windows_capture::capture::{CaptureControl, Context, GraphicsCaptureApiHandler};
 use windows_capture::encoder::{ImageEncoder, ImageEncoderPixelFormat, ImageFormat};
 use windows_capture::frame::Frame;
@@ -55,7 +59,12 @@ struct AudioShared {
 
 impl Default for AudioShared {
     fn default() -> Self {
-        Self { seq: 0, sample_rate: 48_000, channels: 2, chunks: VecDeque::new() }
+        Self {
+            seq: 0,
+            sample_rate: 48_000,
+            channels: 2,
+            chunks: VecDeque::new(),
+        }
     }
 }
 
@@ -91,6 +100,7 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         frame: &mut Frame<'_>,
         _capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
+        // 20 FPS is enough for the first native build and keeps IPC light.
         if self.last_frame.elapsed() < Duration::from_millis(50) {
             return Ok(());
         }
@@ -100,7 +110,10 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         let height = frame.height();
         let buffer = frame.buffer().map_err(|e| e.to_string())?;
         let raw = buffer.as_nopadding_buffer(&mut self.scratch);
-        let jpeg = self.encoder.encode(raw, width, height).map_err(|e| e.to_string())?;
+        let jpeg = self
+            .encoder
+            .encode(raw, width, height)
+            .map_err(|e| e.to_string())?;
 
         if let Ok(mut shared) = self.video.lock() {
             shared.seq = shared.seq.wrapping_add(1).max(1);
@@ -123,7 +136,7 @@ pub struct NativeCaptureState {
     video: Arc<Mutex<VideoShared>>,
     audio: Arc<Mutex<AudioShared>>,
     video_control: Mutex<Option<VideoControl>>,
-    audio_device: Mutex<Option<Device>>,
+    audio_running: Mutex<Option<Arc<AtomicBool>>>,
 }
 
 impl Default for NativeCaptureState {
@@ -133,7 +146,7 @@ impl Default for NativeCaptureState {
             video: Arc::new(Mutex::new(VideoShared::default())),
             audio: Arc::new(Mutex::new(AudioShared::default())),
             video_control: Mutex::new(None),
-            audio_device: Mutex::new(None),
+            audio_running: Mutex::new(None),
         }
     }
 }
@@ -170,9 +183,9 @@ fn stop_video(state: &NativeCaptureState) {
 }
 
 fn stop_audio(state: &NativeCaptureState) {
-    if let Ok(mut guard) = state.audio_device.lock() {
-        if let Some(device) = guard.take() {
-            let _ = device.stop();
+    if let Ok(mut guard) = state.audio_running.lock() {
+        if let Some(flag) = guard.take() {
+            flag.store(false, Ordering::Release);
         }
     }
     if let Ok(mut audio) = state.audio.lock() {
@@ -181,38 +194,161 @@ fn stop_audio(state: &NativeCaptureState) {
     }
 }
 
-fn start_loopback_audio(shared: Arc<Mutex<AudioShared>>) -> Result<Device, String> {
-    let context = AudioContext::new(&[Backend::Wasapi], None).map_err(|e| e.to_string())?;
-    let mut config = DeviceConfig::new(DeviceType::Loopback);
-    config.capture_mut().set_format(Format::F32);
-    config.capture_mut().set_channels(2);
-    config.set_sample_rate(48_000);
+fn run_wasapi_loopback(
+    shared: Arc<Mutex<AudioShared>>,
+    running: Arc<AtomicBool>,
+    ready: mpsc::SyncSender<Result<(), String>>,
+) -> Result<(), String> {
+    initialize_mta().ok().map_err(|e| e.to_string())?;
 
-    let shared_for_cb = shared.clone();
-    config.set_data_callback(move |_device, _output, input| {
-        let samples = input.as_samples::<f32>();
-        if samples.is_empty() {
-            return;
+    let enumerator = match DeviceEnumerator::new() {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = e.to_string();
+            let _ = ready.send(Err(msg.clone()));
+            return Err(msg);
         }
-        if let Ok(mut audio) = shared_for_cb.lock() {
-            audio.seq = audio.seq.wrapping_add(1).max(1);
-            let seq = audio.seq;
-            audio.chunks.push_back(AudioChunk { seq, samples: samples.to_vec() });
-            while audio.chunks.len() > 120 {
-                audio.chunks.pop_front();
+    };
+    // Selecting the default render endpoint and initializing it as Capture
+    // enables WASAPI loopback for the mixed system output.
+    let device = match enumerator.get_default_device(&Direction::Render) {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = e.to_string();
+            let _ = ready.send(Err(msg.clone()));
+            return Err(msg);
+        }
+    };
+    let mut audio_client = match device.get_iaudioclient() {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = e.to_string();
+            let _ = ready.send(Err(msg.clone()));
+            return Err(msg);
+        }
+    };
+
+    let desired_format = WaveFormat::new(32, 32, &SampleType::Float, 48_000, 2, None);
+    let (_, min_time) = match audio_client.get_device_period() {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = e.to_string();
+            let _ = ready.send(Err(msg.clone()));
+            return Err(msg);
+        }
+    };
+    let mode = StreamMode::EventsShared {
+        autoconvert: true,
+        buffer_duration_hns: min_time,
+    };
+    if let Err(e) = audio_client.initialize_client(&desired_format, &Direction::Capture, &mode) {
+        let msg = e.to_string();
+        let _ = ready.send(Err(msg.clone()));
+        return Err(msg);
+    }
+    let event = match audio_client.set_get_eventhandle() {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = e.to_string();
+            let _ = ready.send(Err(msg.clone()));
+            return Err(msg);
+        }
+    };
+    let capture_client = match audio_client.get_audiocaptureclient() {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = e.to_string();
+            let _ = ready.send(Err(msg.clone()));
+            return Err(msg);
+        }
+    };
+    if let Err(e) = audio_client.start_stream() {
+        let msg = e.to_string();
+        let _ = ready.send(Err(msg.clone()));
+        return Err(msg);
+    }
+
+    let _ = ready.send(Ok(()));
+    let mut bytes = VecDeque::<u8>::new();
+
+    while running.load(Ordering::Acquire) {
+        if let Err(e) = capture_client.read_from_device_to_deque(&mut bytes) {
+            let _ = audio_client.stop_stream();
+            return Err(e.to_string());
+        }
+
+        // Keep complete stereo float32 frames only: 2 channels × 4 bytes.
+        let aligned = bytes.len() - (bytes.len() % 8);
+        if aligned > 0 {
+            let mut raw = Vec::with_capacity(aligned);
+            for _ in 0..aligned {
+                if let Some(b) = bytes.pop_front() {
+                    raw.push(b);
+                }
+            }
+            let mut samples = Vec::with_capacity(raw.len() / 4);
+            for chunk in raw.chunks_exact(4) {
+                samples.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+            }
+            if !samples.is_empty() {
+                if let Ok(mut audio) = shared.lock() {
+                    audio.seq = audio.seq.wrapping_add(1).max(1);
+                    let seq = audio.seq;
+                    audio.chunks.push_back(AudioChunk { seq, samples });
+                    while audio.chunks.len() > 120 {
+                        audio.chunks.pop_front();
+                    }
+                }
             }
         }
-    });
 
-    let device = Device::new(Some(context), &config).map_err(|e| e.to_string())?;
-    device.start().map_err(|e| e.to_string())?;
-    Ok(device)
+        // A short timeout lets Stop Sharing end the thread promptly.
+        let _ = event.wait_for_event(100);
+    }
+
+    let _ = audio_client.stop_stream();
+    wasapi::deinitialize();
+    Ok(())
+}
+
+fn start_loopback_audio(shared: Arc<Mutex<AudioShared>>) -> Result<Arc<AtomicBool>, String> {
+    let running = Arc::new(AtomicBool::new(true));
+    let thread_running = running.clone();
+    let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<(), String>>(1);
+
+    thread::Builder::new()
+        .name("DuoCast System Audio".to_string())
+        .spawn(move || {
+            let result = run_wasapi_loopback(shared, thread_running.clone(), ready_tx.clone());
+            if let Err(err) = result {
+                let _ = ready_tx.try_send(Err(err));
+            }
+            thread_running.store(false, Ordering::Release);
+        })
+        .map_err(|e| e.to_string())?;
+
+    match ready_rx.recv_timeout(Duration::from_secs(3)) {
+        Ok(Ok(())) => Ok(running),
+        Ok(Err(err)) => {
+            running.store(false, Ordering::Release);
+            Err(err)
+        }
+        Err(_) => {
+            running.store(false, Ordering::Release);
+            Err("O áudio do sistema demorou demais para iniciar.".to_string())
+        }
+    }
 }
 
 #[tauri::command]
-pub fn native_list_sources(state: State<'_, NativeCaptureState>) -> Result<Vec<NativeSource>, String> {
+pub fn native_list_sources(
+    state: State<'_, NativeCaptureState>,
+) -> Result<Vec<NativeSource>, String> {
     let mut items = Vec::new();
-    let mut targets = state.targets.lock().map_err(|_| "Falha ao acessar as fontes de captura.".to_string())?;
+    let mut targets = state
+        .targets
+        .lock()
+        .map_err(|_| "Falha ao acessar as fontes de captura.".to_string())?;
     targets.clear();
 
     let monitors = Monitor::enumerate().map_err(|e| e.to_string())?;
@@ -220,14 +356,20 @@ pub fn native_list_sources(state: State<'_, NativeCaptureState>) -> Result<Vec<N
         let index = monitor.index().unwrap_or(items.len() + 1);
         let width = monitor.width().unwrap_or(0);
         let height = monitor.height().unwrap_or(0);
-        let name = monitor.name().unwrap_or_else(|_| format!("Tela {index}"));
+        let name = monitor
+            .name()
+            .unwrap_or_else(|_| format!("Tela {index}"));
         let id = format!("monitor:{index}");
         targets.insert(id.clone(), NativeTarget::Monitor(monitor));
         items.push(NativeSource {
             id,
             kind: "monitor".into(),
             title: format!("Tela {index}"),
-            subtitle: if width > 0 && height > 0 { format!("{name} · {width} × {height}") } else { name },
+            subtitle: if width > 0 && height > 0 {
+                format!("{name} · {width} × {height}")
+            } else {
+                name
+            },
             width,
             height,
         });
@@ -254,7 +396,11 @@ pub fn native_list_sources(state: State<'_, NativeCaptureState>) -> Result<Vec<N
             id,
             kind: "window".into(),
             title: title.chars().take(80).collect(),
-            subtitle: if process.is_empty() { format!("{width} × {height}") } else { format!("{process} · {width} × {height}") },
+            subtitle: if process.is_empty() {
+                format!("{width} × {height}")
+            } else {
+                format!("{process} · {width} × {height}")
+            },
             width,
             height,
         });
@@ -280,39 +426,63 @@ pub fn native_start_capture(
     }
 
     let target = {
-        let targets = state.targets.lock().map_err(|_| "Falha ao acessar a fonte escolhida.".to_string())?;
-        targets.get(&source_id).copied().ok_or_else(|| "A fonte escolhida não está mais disponível. Abra o seletor novamente.".to_string())?
+        let targets = state
+            .targets
+            .lock()
+            .map_err(|_| "Falha ao acessar a fonte escolhida.".to_string())?;
+        targets
+            .get(&source_id)
+            .copied()
+            .ok_or_else(|| {
+                "A fonte escolhida não está mais disponível. Abra o seletor novamente.".to_string()
+            })?
     };
 
-    let flags = CaptureFlags { video: state.video.clone() };
+    let flags = CaptureFlags {
+        video: state.video.clone(),
+    };
     let control = match target {
-        NativeTarget::Monitor(monitor) => CaptureHandler::start_free_threaded(capture_settings(monitor, flags))
-            .map_err(|e| e.to_string())?,
-        NativeTarget::Window(window) => CaptureHandler::start_free_threaded(capture_settings(window, flags))
-            .map_err(|e| e.to_string())?,
+        NativeTarget::Monitor(monitor) => {
+            CaptureHandler::start_free_threaded(capture_settings(monitor, flags))
+                .map_err(|e| e.to_string())?
+        }
+        NativeTarget::Window(window) => {
+            CaptureHandler::start_free_threaded(capture_settings(window, flags))
+                .map_err(|e| e.to_string())?
+        }
     };
 
-    *state.video_control.lock().map_err(|_| "Falha ao iniciar a captura.".to_string())? = Some(control);
+    *state
+        .video_control
+        .lock()
+        .map_err(|_| "Falha ao iniciar a captura.".to_string())? = Some(control);
 
     let mut audio_enabled = false;
     if with_audio {
-        match start_loopback_audio(state.audio.clone()) {
-            Ok(device) => {
-                *state.audio_device.lock().map_err(|_| "Falha ao manter o áudio do sistema.".to_string())? = Some(device);
-                audio_enabled = true;
-            }
-            Err(_) => {
-                audio_enabled = false;
-            }
+        if let Ok(flag) = start_loopback_audio(state.audio.clone()) {
+            *state
+                .audio_running
+                .lock()
+                .map_err(|_| "Falha ao manter o áudio do sistema.".to_string())? = Some(flag);
+            audio_enabled = true;
         }
     }
 
-    Ok(NativeStartResult { ok: true, audio_enabled })
+    Ok(NativeStartResult {
+        ok: true,
+        audio_enabled,
+    })
 }
 
 #[tauri::command]
-pub fn native_capture_frame(after_seq: u64, state: State<'_, NativeCaptureState>) -> Result<Response, String> {
-    let video = state.video.lock().map_err(|_| "Falha ao ler o quadro da captura.".to_string())?;
+pub fn native_capture_frame(
+    after_seq: u64,
+    state: State<'_, NativeCaptureState>,
+) -> Result<Response, String> {
+    let video = state
+        .video
+        .lock()
+        .map_err(|_| "Falha ao ler o quadro da captura.".to_string())?;
     if video.seq == 0 || video.seq <= after_seq || video.jpeg.is_empty() {
         return Ok(Response::new(Vec::new()));
     }
@@ -325,11 +495,22 @@ pub fn native_capture_frame(after_seq: u64, state: State<'_, NativeCaptureState>
 }
 
 #[tauri::command]
-pub fn native_capture_audio(after_seq: u64, state: State<'_, NativeCaptureState>) -> Result<Response, String> {
-    let audio = state.audio.lock().map_err(|_| "Falha ao ler o áudio do sistema.".to_string())?;
+pub fn native_capture_audio(
+    after_seq: u64,
+    state: State<'_, NativeCaptureState>,
+) -> Result<Response, String> {
+    let audio = state
+        .audio
+        .lock()
+        .map_err(|_| "Falha ao ler o áudio do sistema.".to_string())?;
     let mut selected = Vec::new();
     let mut last_seq = after_seq;
-    for chunk in audio.chunks.iter().filter(|chunk| chunk.seq > after_seq).take(24) {
+    for chunk in audio
+        .chunks
+        .iter()
+        .filter(|chunk| chunk.seq > after_seq)
+        .take(24)
+    {
         last_seq = chunk.seq;
         selected.extend_from_slice(&chunk.samples);
     }
