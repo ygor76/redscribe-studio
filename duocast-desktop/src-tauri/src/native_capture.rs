@@ -165,7 +165,7 @@ where
     Settings::new(
         item,
         CursorCaptureSettings::WithCursor,
-        DrawBorderSettings::WithoutBorder,
+        DrawBorderSettings::Default,
         SecondaryWindowSettings::Include,
         MinimumUpdateIntervalSettings::Custom(Duration::from_millis(33)),
         DirtyRegionSettings::Default,
