@@ -1,3 +1,4 @@
+# DuoCast v1.7.3 Railway build
 FROM node:24-alpine
 WORKDIR /app
 RUN apk add --no-cache unzip
