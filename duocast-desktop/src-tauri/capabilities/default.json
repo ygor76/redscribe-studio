@@ -1,7 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-capability",
-  "description": "Permissões mínimas do DuoCast Desktop",
+  "description": "Permissões do DuoCast Desktop para a interface oficial hospedada no Netlify.",
   "windows": ["main"],
+  "remote": {
+    "urls": ["https://duocastapp.netlify.app/*"]
+  },
   "permissions": ["core:default"]
 }
