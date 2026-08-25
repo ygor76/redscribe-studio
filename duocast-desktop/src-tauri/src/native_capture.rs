@@ -242,8 +242,8 @@ pub fn native_list_sources(state: State<'_, NativeCaptureState>) -> Result<Vec<N
         if title.is_empty() || title == "DuoCast" {
             continue;
         }
-        let width = window.width().unwrap_or(0);
-        let height = window.height().unwrap_or(0);
+        let width = window.width().unwrap_or(0).max(0) as u32;
+        let height = window.height().unwrap_or(0).max(0) as u32;
         if width < 160 || height < 100 {
             continue;
         }
