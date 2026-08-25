@@ -16,4 +16,4 @@ tauri-build = { version = "2.6.1", features = [] }
 tauri = { version = "2.11.1", features = [] }
 serde = { version = "1", features = ["derive"] }
 windows-capture = "2.0.1"
-miniaudio = "0.10.0"
+wasapi = "0.23.0"
