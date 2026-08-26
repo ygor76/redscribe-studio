@@ -44,6 +44,17 @@ jobs:
           '@ | Set-Content -Encoding UTF8 make_icon.py
           python make_icon.py
 
+      - name: Apply Windows Graphics Capture compatibility
+        shell: pwsh
+        run: |
+          $path = 'src-tauri/src/native_capture.rs'
+          $content = Get-Content $path -Raw
+          $content = $content.Replace('CursorCaptureSettings::WithCursor', 'CursorCaptureSettings::Default')
+          $content = $content.Replace('DrawBorderSettings::WithoutBorder', 'DrawBorderSettings::Default')
+          $content = $content.Replace('SecondaryWindowSettings::Include', 'SecondaryWindowSettings::Default')
+          $content = $content.Replace('MinimumUpdateIntervalSettings::Custom(Duration::from_millis(33))', 'MinimumUpdateIntervalSettings::Default')
+          Set-Content -Path $path -Value $content -NoNewline
+
       - name: Install frontend tooling
         run: npm install
 

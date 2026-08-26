@@ -1,11 +1,12 @@
-# DuoCast Desktop v1.0.0
+# DuoCast Desktop v1.1.0
 
-Aplicativo desktop Windows baseado na versão web estável do DuoCast.
+Versão desktop Windows com compartilhamento nativo.
 
-- Não usa Electron.
-- Usa Tauri/Rust e Microsoft WebView2.
-- Abre o DuoCast em janela própria, sem interface do Chrome/Edge.
-- A interface continua vindo do endereço oficial https://duocastapp.netlify.app, portanto melhorias do site aparecem no desktop sem reinstalar o aplicativo.
-- O compartilhamento usa a captura do WebView2/Windows. A barra fixa do Chrome não existe dentro do app desktop.
+- Tauri/Rust + Microsoft WebView2 para a interface.
+- Windows Graphics Capture para capturar telas e janelas.
+- WASAPI loopback para áudio do computador.
+- Seletor visual do próprio DuoCast; não chama `getDisplayMedia()` no modo desktop nativo.
+- O site continua em https://duocastapp.netlify.app e mantém o fluxo de compartilhamento normal do navegador.
+- Sem janela CMD em builds release.
 
-Para uma distribuição com Publisher verificado no Windows/SmartScreen, será necessário adicionar assinatura de código com certificado próprio.
+A interface web precisa estar na versão v1.9.8 ou superior para usar a ponte de captura nativa.
