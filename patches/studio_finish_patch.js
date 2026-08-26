@@ -1,8 +1,9 @@
 (() => {
   'use strict';
 
-  const BUILD = '5.2.7-studio-finish';
+  const BUILD = '5.2.8-media-fix';
   const nativeFetch = window.fetch.bind(window);
+  const LOCAL_BASE = window.RedScribeLocalBridge?.base || 'http://127.0.0.1:8765';
   let lastRender = null;
   let finishing = false;
 
@@ -10,11 +11,46 @@
   const style = document.createElement('style');
   style.dataset.redscribeStudioFix = BUILD;
   style.textContent = `
-    .studio-design-badge-avatar{overflow:hidden!important;aspect-ratio:1/1;flex:none}
+    .studio-design-badge-avatar{overflow:hidden!important;aspect-ratio:1/1;flex:none;border-radius:50%!important}
     .studio-design-badge-avatar img{display:block!important;width:100%!important;height:100%!important;object-fit:cover!important;object-position:center!important;border-radius:50%!important}
-    .studio-design-badge-check{aspect-ratio:1/1;border-radius:50%!important;line-height:1!important;overflow:hidden!important;flex:none}
+    .studio-design-badge-check{aspect-ratio:1/1;border-radius:50%!important;line-height:1!important;overflow:hidden!important;flex:none;display:inline-grid!important;place-items:center!important}
   `;
   document.head.appendChild(style);
+
+  // O Estúdio roda no Railway, mas as fotos/overlays pertencem ao motor local.
+  // <img src="/studio/overlay/..."> não passa pelo interceptador de fetch, então
+  // reescrevemos a URL da mídia para localhost explicitamente.
+  function localizeStudioMedia(root = document) {
+    const images = [];
+    if (root?.nodeType === 1 && root.matches?.('img[src^="/studio/overlay/"]')) images.push(root);
+    if (root?.querySelectorAll) images.push(...root.querySelectorAll('img[src^="/studio/overlay/"]'));
+    for (const img of images) {
+      const relative = img.getAttribute('src');
+      if (!relative || !relative.startsWith('/studio/overlay/')) continue;
+      img.src = `${LOCAL_BASE}${relative}`;
+      img.dataset.redscribeLocalMedia = BUILD;
+    }
+  }
+
+  const mediaObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.type === 'attributes') {
+        localizeStudioMedia(mutation.target);
+        continue;
+      }
+      for (const node of mutation.addedNodes || []) localizeStudioMedia(node);
+    }
+  });
+
+  function startMediaObserver() {
+    localizeStudioMedia(document);
+    mediaObserver.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['src']
+    });
+  }
 
   function idFromRenderUrl(url) {
     const match = String(url || '').match(/\/api\/studio\/render\/([^/?#]+)/);
@@ -50,7 +86,7 @@
   async function deleteDraft(assetId) {
     if (!assetId) return;
     try {
-      await nativeFetch(`http://127.0.0.1:8765/api/studio/session/${encodeURIComponent(assetId)}`, {
+      await nativeFetch(`${LOCAL_BASE}/api/studio/session/${encodeURIComponent(assetId)}`, {
         method: 'DELETE', mode: 'cors', credentials: 'omit'
       });
     } catch {}
@@ -85,7 +121,7 @@
       button.textContent = 'Substituindo...';
     }
     try {
-      const response = await nativeFetch(`http://127.0.0.1:8765/api/studio/replace/${encodeURIComponent(lastRender.originalId)}/${encodeURIComponent(lastRender.renderedId)}`, {
+      const response = await nativeFetch(`${LOCAL_BASE}/api/studio/replace/${encodeURIComponent(lastRender.originalId)}/${encodeURIComponent(lastRender.renderedId)}`, {
         method: 'POST', mode: 'cors', credentials: 'omit'
       });
       if (!response.ok) {
@@ -146,6 +182,11 @@
     }
   }, true);
 
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startMediaObserver, {once:true});
+  } else {
+    startMediaObserver();
+  }
   showStudioCleanAfterReload();
-  console.info('[RedScribe] Studio finish patch ativo', BUILD);
+  console.info('[RedScribe] Studio media/finish patch ativo', BUILD);
 })();
