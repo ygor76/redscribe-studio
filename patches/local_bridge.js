@@ -2,7 +2,7 @@
   'use strict';
 
   const LOCAL_BASE = 'http://127.0.0.1:8765';
-  const REQUIRED_ENGINE_VERSION = '5.2.7-studio';
+  const REQUIRED_ENGINE_VERSION = '5.2.8-media';
   const nativeFetch = window.fetch.bind(window);
 
   const LOCAL_API_PREFIXES = [
@@ -80,7 +80,7 @@
 
   function offlineResponse() {
     return new Response(JSON.stringify({
-      error: 'O motor local do RedScribe não está aberto ou está desatualizado. Abra o RedScribe Local Engine 5.2.7 e tente novamente.'
+      error: 'O motor local do RedScribe não está aberto ou está desatualizado. Abra o RedScribe Local Engine 5.2.8 e tente novamente.'
     }), {
       status: 503,
       headers: {'Content-Type': 'application/json; charset=utf-8'}
