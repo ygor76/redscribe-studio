@@ -2,7 +2,7 @@
   'use strict';
 
   const LOCAL_BASE = 'http://127.0.0.1:8765';
-  const REQUIRED_ENGINE_VERSION = '5.2.8-media';
+  const REQUIRED_ENGINE_VERSION = '5.3.0-smart-ai';
   const nativeFetch = window.fetch.bind(window);
 
   const LOCAL_API_PREFIXES = [
@@ -18,7 +18,9 @@
     '/api/backup/',
     '/api/shorts/',
     '/api/studio/',
-    '/api/publish/'
+    '/api/publish/',
+    '/api/integrations',
+    '/api/youtube/search'
   ];
 
   const LOCAL_MEDIA_PREFIXES = [
@@ -34,7 +36,6 @@
     '/api/me',
     '/api/plan/',
     '/api/recommendations',
-    '/api/youtube/search',
     '/api/settings',
     '/api/ai/',
     '/api/tiktok/'
@@ -80,7 +81,7 @@
 
   function offlineResponse() {
     return new Response(JSON.stringify({
-      error: 'O motor local do RedScribe não está aberto ou está desatualizado. Abra o RedScribe Local Engine 5.2.8 e tente novamente.'
+      error: 'O motor local do RedScribe não está aberto ou está desatualizado. Abra o RedScribe Local Engine 5.3.0 e tente novamente.'
     }), {
       status: 503,
       headers: {'Content-Type': 'application/json; charset=utf-8'}
