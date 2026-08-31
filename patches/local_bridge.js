@@ -12,6 +12,7 @@
     '/api/history',
     '/api/search',
     '/api/downloads',
+    '/api/save/',
     '/api/storage/',
     '/api/projects',
     '/api/trash',
